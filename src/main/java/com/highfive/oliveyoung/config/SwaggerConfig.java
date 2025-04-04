@@ -1,4 +1,4 @@
-package com.highfive.oliveyoung;
+package com.highfive.oliveyoung.config;
 
 import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
