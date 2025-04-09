@@ -1,5 +1,6 @@
 package com.highfive.oliveyoung.product;
 
+import com.highfive.oliveyoung.product.repository.ProductRepository;
 import com.highfive.oliveyoung.stock.Stock;
 import com.highfive.oliveyoung.stock.StockRepository;
 import lombok.RequiredArgsConstructor;
@@ -31,8 +32,8 @@ public class ProductService {
         return saved;
     }
 
-    public List<Product> getAllProducts() {
-        return productRepository.findAll();
+    public List<ProductWithStockRes> getAllProducts() {
+        return productRepository.findAllWithStock();
     }
 
     @Transactional
