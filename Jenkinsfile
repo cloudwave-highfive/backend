@@ -12,8 +12,6 @@ pipeline {
                 withCredentials([usernamePassword(credentialsId: 'dockerhub-account', usernameVariable: 'DOCKERHUB_ID', passwordVariable: 'DOCKERHUB_PW')]) {
                     script {
                         // DockerHub 아이디와 비밀번호를 환경 변수로 설정
-		                env.DOCKERHUB_ID = "${DOCKERHUB_ID}"  // DockerHub 아이디
-				        env.DOCKERHUB_PW = "${DOCKERHUB_PW}"  // DockerHub 비밀번호
                         env.IMAGE_NAME   = "${DOCKERHUB_ID}/${env.APP_NAME}"  // 이미지 이름 형식 설정 (아이디/앱 이름)
                     }
                 }
@@ -49,8 +47,10 @@ pipeline {
 
         stage('Docker Login') {
             steps {
-                // DockerHub 로그인
-                sh "echo ${env.DOCKERHUB_PW} | docker login -u ${env.DOCKERHUB_ID} --password-stdin"
+                withCredentials([usernamePassword(credentialsId: 'dockerhub-account', usernameVariable: 'DOCKERHUB_ID', passwordVariable: 'DOCKERHUB_PW')]) {
+                    // DockerHub 로그인
+                    sh "echo ${env.DOCKERHUB_PW} | docker login -u ${env.DOCKERHUB_ID} --password-stdin"
+                }
             }
         }
 
