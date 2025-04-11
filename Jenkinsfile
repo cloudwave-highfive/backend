@@ -73,8 +73,9 @@ pipeline {
                     // 새로운 컨테이너 실행 (포트 매핑: 호스트 8081 -> 컨테이너 8080)
                     sh """
                     docker run -d --name ${env.APP_NAME} \
-                      -p 8081:8080 \
-                      ${env.IMAGE_NAME}:${env.IMAGE_TAG}
+                        -p 8081:8080 \
+                        --network spring-mongo-net \
+                        ${env.IMAGE_NAME}:${env.IMAGE_TAG}
                     """
                 }
             }
