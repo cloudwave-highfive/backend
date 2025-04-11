@@ -27,6 +27,17 @@ pipeline {
             }
         }
 
+        stage('Prepare Config') {
+            steps {
+                withCredentials([file(credentialsId: 'spring-properties', variable: 'APP_PROPS')]) {
+                    // Secret 파일을 ./src/main/resources에 저장
+                    sh 'mkdir -p ./src/main/resources'
+                    sh 'chmod 644 ./src/main/resources/application.properties'
+                    sh "cp ${APP_PROPS} ./src/main/resources/application.properties"
+                }
+            }
+        }
+
         stage('Build Spring Boot') {
             steps {
                 // Gradle 실행 권한 부여
