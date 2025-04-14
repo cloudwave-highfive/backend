@@ -8,6 +8,7 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/products")
+@CrossOrigin(origins = "*")
 @RequiredArgsConstructor
 public class ProductController {
 

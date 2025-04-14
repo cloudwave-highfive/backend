@@ -6,6 +6,7 @@ import org.springframework.web.bind.annotation.*;
 
 @RestController
 @RequestMapping("/stocks")
+@CrossOrigin(origins = "*")
 @RequiredArgsConstructor
 public class StockController {
 
