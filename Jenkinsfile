@@ -2,8 +2,11 @@ pipeline {
     agent any
 
     environment {
-		APP_NAME  = "oliveyoung"  // 애플리케이션 이름 설정
+        APP_NAME  = "oliveyoung"  // 애플리케이션 이름 설정
         IMAGE_TAG = "build-${env.BUILD_NUMBER}"  // 빌드 번호를 사용하여 이미지 태그 설정
+        SONAR_PROJECT_KEY = credentials('sonarqube-projectkey')  // SonarQube 프로젝트 키
+        SONAR_HOST_URL = credentials('sonarqube-hosturl')  // SonarQube 서버 주소
+        SONAR_LOGIN = credentials('sonarqube-login')  // SonarQube 권한 부여 받기 위한 토큰
     }
 
     stages {
@@ -39,17 +42,31 @@ pipeline {
         stage('Build Spring Boot') {
             steps {
                 // Gradle 실행 권한 부여
-		        sh 'chmod +x gradlew'
-		        // Spring Boot 프로젝트 빌드
+				        sh 'chmod +x gradlew'
+				        // Spring Boot 프로젝트 빌드
                 sh './gradlew clean build'
             }
         }
+
+        stage('SonarQube Analysis') {
+            steps {
+                withSonarQubeEnv('sonarqube-token') {
+                    // gradlew를 사용해 SonarQube 분석 실행
+                    sh '''
+                    ./gradlew sonarqube \
+                        -Dsonar.projectKey=${env.SONAR_PROJECT_KEY} \
+                        -Dsonar.host.url=${env.SONAR_HOST_URL} \
+                        -Dsonar.login=${env.SONAR_LOGIN}
+                    '''
+                }
+            }
+        }\
 
         stage('Docker Login') {
             steps {
                 withCredentials([usernamePassword(credentialsId: 'dockerhub-account', usernameVariable: 'DOCKERHUB_ID', passwordVariable: 'DOCKERHUB_PW')]) {
                     // DockerHub 로그인
-                    sh "echo ${env.DOCKERHUB_PW} | docker login -u ${env.DOCKERHUB_ID} --password-stdin"
+                    sh "echo ${DOCKERHUB_PW} | docker login -u ${DOCKERHUB_ID} --password-stdin"
                 }
             }
         }
