@@ -52,12 +52,12 @@ pipeline {
             steps {
                 withSonarQubeEnv('sonarqube-token') {
                     // gradlew를 사용해 SonarQube 분석 실행
-                    sh '''
+                    sh """
                     ./gradlew sonarqube \
                         -Dsonar.projectKey=${env.SONAR_PROJECT_KEY} \
                         -Dsonar.host.url=${env.SONAR_HOST_URL} \
                         -Dsonar.login=${env.SONAR_LOGIN}
-                    '''
+                    """
                 }
             }
         }\
