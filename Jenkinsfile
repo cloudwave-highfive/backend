@@ -42,9 +42,9 @@ pipeline {
         stage('Build Spring Boot') {
             steps {
                 // Gradle 실행 권한 부여
-				        sh 'chmod +x gradlew'
-				        // Spring Boot 프로젝트 빌드
-                sh './gradlew clean build'
+                sh 'chmod +x gradlew'
+                // Spring Boot 프로젝트 빌드
+                sh 'bash gradlew clean build'
             }
         }
 
@@ -53,7 +53,7 @@ pipeline {
                 withSonarQubeEnv('sonarqube-token') {
                     // gradlew를 사용해 SonarQube 분석 실행
                     sh """
-                    ./gradlew sonarqube \
+                    bash gradlew sonarqube \
                         -Dsonar.projectKey=${env.SONAR_PROJECT_KEY} \
                         -Dsonar.host.url=${env.SONAR_HOST_URL} \
                         -Dsonar.login=${env.SONAR_LOGIN}
