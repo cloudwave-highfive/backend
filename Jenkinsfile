@@ -81,6 +81,50 @@ pipeline {
             }
         }
 
+        stage('Security Scan with Trivy') {
+            steps {
+                script {
+                    // 1차: 실패 조건용 스캔
+                    sh """
+                    echo "[1/2] Checking CRITICAL/HIGH vulnerabilities..."
+                    docker run --rm \
+                        -v /var/run/docker.sock:/var/run/docker.sock \
+                        -v ${env.WORKSPACE}/trivy-cache:/root/.cache/ \
+                        aquasec/trivy:latest image \
+                        --exit-code 1 \
+                        --severity CRITICAL,HIGH \
+                        --no-progress \
+                        ${env.IMAGE_NAME}:${env.IMAGE_TAG}
+                    """
+
+                    // 2차: 리포트 저장용 스캔 (MEDIUM 이하)
+                    sh """
+                    echo "[2/2] Saving report of MEDIUM and below..."
+                    mkdir -p trivy-reports
+                    docker run --rm \
+                        -v /var/run/docker.sock:/var/run/docker.sock \
+                        -v ${env.WORKSPACE}/trivy-cache:/root/.cache/ \
+                        -v ${env.WORKSPACE}/trivy-reports:/reports \
+                        aquasec/trivy:latest image \
+                        --exit-code 0 \
+                        --severity UNKNOWN,LOW,MEDIUM \
+                        --no-progress \
+                        --format table \
+                        --output /reports/medium_and_below.txt \
+                        ${env.IMAGE_NAME}:${env.IMAGE_TAG}
+                    """
+                }
+            }
+
+            post {
+                always {
+                    // Jenkins 아티팩트로 리포트 업로드
+                    archiveArtifacts artifacts: 'trivy-reports/medium_and_below.txt', onlyIfSuccessful: false
+                }
+            }
+        }
+
+
         stage('Run Spring Container') {
             steps {
                 script {
