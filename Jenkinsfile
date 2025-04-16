@@ -32,9 +32,18 @@ pipeline {
             steps {
                 withCredentials([file(credentialsId: 'spring-properties', variable: 'APP_PROPS')]) {
                     // Secret 파일을 ./src/main/resources에 저장
-                    sh 'mkdir -p ./src/main/resources'
-                    sh 'chmod 644 ./src/main/resources/application.properties'
-                    sh "cp ${APP_PROPS} ./src/main/resources/application.properties"
+                    sh """
+                        mkdir -p ./src/main/resources
+
+                        # 파일이 존재하면 삭제
+                        [ -f ./src/main/resources/application.properties ] && rm -f ./src/main/resources/application.properties
+
+                        # 복사
+                        cp "${APP_PROPS}" ./src/main/resources/application.properties
+
+                        # 권한 부여
+                        chmod 644 ./src/main/resources/application.properties
+                    """
                 }
             }
         }
