@@ -7,6 +7,7 @@ pipeline {
         SONAR_PROJECT_KEY = credentials('sonarqube-projectkey')  // SonarQube 프로젝트 키
         SONAR_HOST_URL = credentials('sonarqube-hosturl')  // SonarQube 서버 주소
         SONAR_LOGIN = credentials('sonarqube-login')  // SonarQube 권한 부여 받기 위한 토큰
+        SLACK_CHANNEL = credentials('slack-channel-dm')  // Slack 알림을 받을 채널
     }
 
     stages {
@@ -57,6 +58,62 @@ pipeline {
             }
         }
 
+        stage('Filesystem Scan with Trivy') {
+            steps {
+                script {
+                    // Filesystem Scan 결과를 Table 형식으로 출력 및 저장
+                    sh """
+                    echo "[1/2] Running Filesystem Scan (Table format)..."
+                    mkdir -p trivy-reports
+                    docker run --rm \
+                        -v ${env.WORKSPACE}:/project \
+                        -v ${env.WORKSPACE}/trivy-reports:/reports \
+                        aquasec/trivy:latest fs \
+                        --no-progress \
+                        --format table \
+                        /project | tee trivy-reports/filesystem_scan.txt
+                    """
+
+                    // Filesystem Scan 결과를 JSON 형식으로 저장
+                    sh """
+                    echo "[2/2] Running Filesystem Scan (JSON format)..."
+                    docker run --rm \
+                        -v ${env.WORKSPACE}:/project \
+                        -v ${env.WORKSPACE}/trivy-reports:/reports \
+                        aquasec/trivy:latest fs \
+                        --no-progress \
+                        --format json \
+                        --output /reports/filesystem_scan.json \
+                        /project
+                    """
+
+                    // CRITICAL, HIGH 발견 시 Slack 알림 보내고 파이프라인 종료
+                    def vulnCount = sh(script: """
+                        jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL" or .Severity == "HIGH")] | length' trivy-reports/filesystem_scan.json
+                    """, returnStdout: true).trim().toInteger()
+
+                    if (vulnCount > 0) {
+                        slackSend (
+                            channel: "${env.SLACK_CHANNEL}",
+                            color: 'danger',
+                            message: "*Trivy Filesystem Scan*\nFound ${vulnCount} CRITICAL or HIGH vulnerabilities in the filesystem scan."
+                        )
+                        error "CRITICAL/HIGH vulnerabilities found in filesystem scan. Failing the pipeline."
+                    } else {
+                        echo "[INFO] No CRITICAL or HIGH vulnerabilities found in filesystem scan."
+                    }
+                }
+            }
+
+            post {
+                always {
+                    // Jenkins 아티팩트로 리포트 업로드
+                    archiveArtifacts artifacts: 'trivy-reports/filesystem_scan.txt', onlyIfSuccessful: false
+                }
+            }
+        }
+
+
         stage('SonarQube Analysis') {
             steps {
                 withSonarQubeEnv('sonarqube-token') {
@@ -90,45 +147,58 @@ pipeline {
             }
         }
 
-        stage('Security Scan with Trivy') {
+        stage('Image Scan with Trivy') {
             steps {
                 script {
-                    // 1차: 실패 조건용 스캔
+                    // Image Scan 결과를 Table 형식으로 출력 및 저장
                     sh """
-                    echo "[1/2] Checking CRITICAL/HIGH vulnerabilities..."
+                    echo "[1/2] Running Image Scan (Table format)..."
+                    mkdir -p trivy-reports
                     docker run --rm \
                         -v /var/run/docker.sock:/var/run/docker.sock \
                         -v ${env.WORKSPACE}/trivy-cache:/root/.cache/ \
                         aquasec/trivy:latest image \
-                        --exit-code 1 \
-                        --severity CRITICAL,HIGH \
                         --no-progress \
-                        ${env.IMAGE_NAME}:${env.IMAGE_TAG}
+                        --format table \
+                        ${env.IMAGE_NAME}:${env.IMAGE_TAG} | tee trivy-reports/image_scan.txt
                     """
 
-                    // 2차: 리포트 저장용 스캔 (MEDIUM 이하)
+                    // Image Scan 결과를 JSON 형식으로 저장
                     sh """
-                    echo "[2/2] Saving report of MEDIUM and below..."
-                    mkdir -p trivy-reports
+                    echo "[2/2] Running Image Scan (JSON format)..."
                     docker run --rm \
                         -v /var/run/docker.sock:/var/run/docker.sock \
                         -v ${env.WORKSPACE}/trivy-cache:/root/.cache/ \
                         -v ${env.WORKSPACE}/trivy-reports:/reports \
                         aquasec/trivy:latest image \
-                        --exit-code 0 \
-                        --severity UNKNOWN,LOW,MEDIUM \
                         --no-progress \
-                        --format table \
-                        --output /reports/medium_and_below.txt \
+                        --format json \
+                        --output /reports/image_scan.json \
                         ${env.IMAGE_NAME}:${env.IMAGE_TAG}
                     """
+
+                    // CRITICAL, HIGH 발견 시 Slack 알림 보내고 파이프라인 종료
+                    def vulnCount = sh(script: """
+                        jq '[.Results[]?.Vulnerabilities[]? | select(.Severity == "CRITICAL" or .Severity == "HIGH")] | length' trivy-reports/image_scan.json
+                    """, returnStdout: true).trim().toInteger()
+
+                    if (vulnCount > 0) {
+                        slackSend (
+                            channel: "${env.SLACK_CHANNEL}",
+                            color: 'danger',
+                            message: "*Trivy Image Scan*\nFound ${vulnCount} CRITICAL or HIGH vulnerabilities in the image scan."
+                        )
+                        error "CRITICAL/HIGH vulnerabilities found in image scan. Failing the pipeline."
+                    } else {
+                        echo "[INFO] No CRITICAL or HIGH vulnerabilities found in image scan."
+                    }
                 }
             }
 
             post {
                 always {
                     // Jenkins 아티팩트로 리포트 업로드
-                    archiveArtifacts artifacts: 'trivy-reports/medium_and_below.txt', onlyIfSuccessful: false
+                    archiveArtifacts artifacts: 'trivy-reports/image_scan.txt', onlyIfSuccessful: false
                 }
             }
         }
