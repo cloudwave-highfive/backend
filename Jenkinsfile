@@ -2,8 +2,12 @@ pipeline {
     agent any
 
     environment {
-        APP_NAME  = "oliveyoung"  // 애플리케이션 이름 설정
-        IMAGE_TAG = "build-${env.BUILD_NUMBER}"  // 빌드 번호를 사용하여 이미지 태그 설정
+        APP_NAME = 'oliveyoung'  // 애플리케이션 이름 설정
+        AWS_REGION = 'ap-northeast-2' // AWS 리전명
+        AWS_CREDENTIAL_ID = 'aws-ecr-accesskey' // AWS Credentials로 등록한 ID
+        AWS_ECR_PATH = credentials('aws-ecr-path')  // ECR 주소
+        IMAGE_NAME = "${AWS_ECR_PATH}/oliveyoung/backend" // Docker Image 이름
+        IMAGE_TAG = "build-${BUILD_NUMBER}"  // 빌드 번호를 사용하여 이미지 태그 설정
         SONAR_PROJECT_KEY = credentials('sonarqube-projectkey')  // SonarQube 프로젝트 키
         SONAR_HOST_URL = credentials('sonarqube-hosturl')  // SonarQube 서버 주소
         SONAR_LOGIN = credentials('sonarqube-login')  // SonarQube 권한 부여 받기 위한 토큰
@@ -11,17 +15,6 @@ pipeline {
     }
 
     stages {
-	    stage('Set Global DockerHub Account') {
-            steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-account', usernameVariable: 'DOCKERHUB_ID', passwordVariable: 'DOCKERHUB_PW')]) {
-                    script {
-                        // DockerHub 아이디와 비밀번호를 환경 변수로 설정
-                        env.IMAGE_NAME   = "${DOCKERHUB_ID}/${env.APP_NAME}"  // 이미지 이름 형식 설정 (아이디/앱 이름)
-                    }
-                }
-            }
-        }
-
         stage('Clone Repository') {
             steps {
                 // GitHub에서 main 브랜치를 클론
@@ -66,8 +59,8 @@ pipeline {
                     echo "[1/2] Running Filesystem Scan (Table format)..."
                     mkdir -p trivy-reports
                     docker run --rm \
-                        -v ${env.WORKSPACE}:/project \
-                        -v ${env.WORKSPACE}/trivy-reports:/reports \
+                        -v ${WORKSPACE}:/project \
+                        -v ${WORKSPACE}/trivy-reports:/reports \
                         aquasec/trivy:latest fs \
                         --no-progress \
                         --format table \
@@ -78,8 +71,8 @@ pipeline {
                     sh """
                     echo "[2/2] Running Filesystem Scan (JSON format)..."
                     docker run --rm \
-                        -v ${env.WORKSPACE}:/project \
-                        -v ${env.WORKSPACE}/trivy-reports:/reports \
+                        -v ${WORKSPACE}:/project \
+                        -v ${WORKSPACE}/trivy-reports:/reports \
                         aquasec/trivy:latest fs \
                         --no-progress \
                         --format json \
@@ -94,7 +87,7 @@ pipeline {
 
                     if (vulnCount > 0) {
                         slackSend (
-                            channel: "${env.SLACK_CHANNEL}",
+                            channel: "${SLACK_CHANNEL}",
                             color: 'danger',
                             message: "*Trivy Filesystem Scan*\nFound ${vulnCount} CRITICAL or HIGH vulnerabilities in the filesystem scan."
                         )
@@ -120,19 +113,10 @@ pipeline {
                     // gradlew를 사용해 SonarQube 분석 실행
                     sh """
                     bash gradlew sonarqube \
-                        -Dsonar.projectKey=${env.SONAR_PROJECT_KEY} \
-                        -Dsonar.host.url=${env.SONAR_HOST_URL} \
-                        -Dsonar.login=${env.SONAR_LOGIN}
+                        -Dsonar.projectKey=${SONAR_PROJECT_KEY} \
+                        -Dsonar.host.url=${SONAR_HOST_URL} \
+                        -Dsonar.login=${SONAR_LOGIN}
                     """
-                }
-            }
-        }\
-
-        stage('Docker Login') {
-            steps {
-                withCredentials([usernamePassword(credentialsId: 'dockerhub-account', usernameVariable: 'DOCKERHUB_ID', passwordVariable: 'DOCKERHUB_PW')]) {
-                    // DockerHub 로그인
-                    sh "echo ${DOCKERHUB_PW} | docker login -u ${DOCKERHUB_ID} --password-stdin"
                 }
             }
         }
@@ -140,9 +124,18 @@ pipeline {
         stage('Build & Push Image') {
             steps {
                 script {
-                    // Docker 이미지를 빌드하고 DockerHub에 푸시
-                    docker.build("${env.IMAGE_NAME}:${env.IMAGE_TAG}")
-                        .push()
+		                // cleanup current user docker credentials
+                    sh 'rm -f ~/.dockercfg ~/.docker/config.json || true'
+
+                    // Docker 이미지를 빌드하고 ECR에 푸시
+                    sh """
+                    docker build -t ${IMAGE_NAME}:${IMAGE_TAG} .
+                    docker tag ${IMAGE_NAME}:${IMAGE_TAG} ${IMAGE_NAME}:latest
+                    """
+                    docker.withRegistry("https://${AWS_ECR_PATH}", "ecr:${AWS_REGION}:${AWS_CREDENTIAL_ID}") {
+										    docker.image("${IMAGE_NAME}:${IMAGE_TAG}").push()
+										    docker.image("${IMAGE_NAME}:latest").push()
+										}
                 }
             }
         }
@@ -156,11 +149,11 @@ pipeline {
                     mkdir -p trivy-reports
                     docker run --rm \
                         -v /var/run/docker.sock:/var/run/docker.sock \
-                        -v ${env.WORKSPACE}/trivy-cache:/root/.cache/ \
+                        -v ${WORKSPACE}/trivy-cache:/root/.cache/ \
                         aquasec/trivy:latest image \
                         --no-progress \
                         --format table \
-                        ${env.IMAGE_NAME}:${env.IMAGE_TAG} | tee trivy-reports/image_scan.txt
+                        ${IMAGE_NAME}:${IMAGE_TAG} | tee trivy-reports/image_scan.txt
                     """
 
                     // Image Scan 결과를 JSON 형식으로 저장
@@ -168,13 +161,13 @@ pipeline {
                     echo "[2/2] Running Image Scan (JSON format)..."
                     docker run --rm \
                         -v /var/run/docker.sock:/var/run/docker.sock \
-                        -v ${env.WORKSPACE}/trivy-cache:/root/.cache/ \
-                        -v ${env.WORKSPACE}/trivy-reports:/reports \
+                        -v ${WORKSPACE}/trivy-cache:/root/.cache/ \
+                        -v ${WORKSPACE}/trivy-reports:/reports \
                         aquasec/trivy:latest image \
                         --no-progress \
                         --format json \
                         --output /reports/image_scan.json \
-                        ${env.IMAGE_NAME}:${env.IMAGE_TAG}
+                        ${IMAGE_NAME}:${IMAGE_TAG}
                     """
 
                     // CRITICAL, HIGH 발견 시 Slack 알림 보내고 파이프라인 종료
@@ -184,7 +177,7 @@ pipeline {
 
                     if (vulnCount > 0) {
                         slackSend (
-                            channel: "${env.SLACK_CHANNEL}",
+                            channel: "${SLACK_CHANNEL}",
                             color: 'danger',
                             message: "*Trivy Image Scan*\nFound ${vulnCount} CRITICAL or HIGH vulnerabilities in the image scan."
                         )
@@ -208,14 +201,14 @@ pipeline {
             steps {
                 script {
                     // 기존 컨테이너가 있으면 삭제
-                    sh "docker rm -f ${env.APP_NAME} || true"
+                    sh "docker rm -f ${APP_NAME} || true"
 
                     // 새로운 컨테이너 실행 (포트 매핑: 호스트 8081 -> 컨테이너 8080)
                     sh """
-                    docker run -d --name ${env.APP_NAME} \
+                    docker run -d --name ${APP_NAME} \
                         -p 8081:8080 \
                         --network spring-mongo-net \
-                        ${env.IMAGE_NAME}:${env.IMAGE_TAG}
+                        ${IMAGE_NAME}:${IMAGE_TAG}
                     """
                 }
             }
